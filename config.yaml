@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# DEM pipeline configuration — Copernicus GLO-30 (AWS + Google Earth Engine)
+# for flood and drainage analysis.
+# ---------------------------------------------------------------------------
+project_name: demo_site
+output_dir: ./outputs
+
+# ---- Area of interest (all coordinates EPSG:4326 lon/lat) ------------------
+aoi:
+  type: bbox                     # bbox | point | file
+  bbox: [77.55, 12.90, 77.65, 13.00]   # minLon, minLat, maxLon, maxLat
+  point: [77.59, 12.97]          # lon, lat           (type: point)
+  radius_km: 10                  # radius around point (type: point)
+  file: null                     # .shp / .geojson / .gpkg (type: file)
+  # Buffer added around the AOI before processing. Flow accumulation is
+  # truncated at raster edges, so drainage results are only reliable well
+  # inside the buffered area. Best practice: make the AOI the whole upstream
+  # catchment (e.g. a HydroBASINS polygon) and keep a modest buffer.
+  buffer_km: 2.0
+
+# ---- Analysis grid ---------------------------------------------------------
+grid:
+  crs: auto                      # auto = UTM zone of AOI centroid, or e.g. EPSG:32643
+  resolution: 30                 # metres
+
+# ---- Source 1: Copernicus GLO-30 straight from the AWS open-data bucket -----
+aws:
+  enabled: true
+  cache_tiles: false             # true = download full 1x1 deg tiles to raw/tiles
+                                 # false = stream only the AOI window (COG range reads)
+
+# ---- Source 2: Google Earth Engine -----------------------------------------
+gee:
+  enabled: false                 # set true after `earthengine authenticate`
+  project: your-gcp-project-id   # Cloud project registered for Earth Engine
+  # glo30   : COPERNICUS/DEM/GLO30 (same data as AWS; a DSM, so it includes buildings and trees)
+  # fabdem  : FABDEM bare-earth (GLO-30 with forests and buildings removed).
+  #           Recommended for flood work; licence is CC BY-NC-SA 4.0.
+  # nasadem : NASADEM (reprocessed SRTM, also a DSM)
+  datasets: [glo30, fabdem]
+  mode: direct                   # direct = computePixels in chunks | drive = Export to Drive
+  chunk_px: 2048                 # chunk edge for direct mode (2048^2 float32 = 16 MB)
+  workers: 4
+  drive_folder: dem_exports
+
+# ---- Hydrological conditioning and derivatives (WhiteboxTools) -------------
+hydro:
+  enabled: true
+  input: glo30_aws               # glo30_aws | glo30_gee | fabdem_gee | nasadem_gee
+  breach_dist_cells: 100         # max breach channel length (cells); larger fixes more
+                                 # road/bridge "dams" in a DSM but takes longer
+  stream_threshold_km2: 0.5      # contributing area needed to start a channel
+  pour_points: null              # optional point file -> watershed delineation
+  snap_dist_m: 90                # snap pour points to the highest flow accumulation
+  clip_to_aoi: true              # also write AOI-clipped copies of the main rasters
+
+# ---- QA --------------------------------------------------------------------
+qa:
+  enabled: true                  # stats for every DEM and AWS-vs-GEE difference

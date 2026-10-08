@@ -1,0 +1,8 @@
+# Pipeline outputs and caches
+outputs/
+__pycache__/
+*.pyc
+*.tif
+*.part
+.ipynb_checkpoints/
+.venv/
