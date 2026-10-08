@@ -20,8 +20,8 @@ GTIFF_PROFILE = dict(
 )
 
 
-def write_raster(path, arr, transform, crs, nodata=NODATA):
-    """Write a single-band float32 GeoTIFF (deflate-compressed and tiled)."""
+def write_raster(path, arr, transform, crs, nodata=NODATA, dtype="float32"):
+    """Write a single-band GeoTIFF (float32 by default; deflate-compressed and tiled)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     profile = {
@@ -31,9 +31,10 @@ def write_raster(path, arr, transform, crs, nodata=NODATA):
         "crs": crs,
         "transform": transform,
         "nodata": nodata,
+        "dtype": dtype,
     }
     with rasterio.open(path, "w", **profile) as dst:
-        dst.write(arr.astype("float32"), 1)
+        dst.write(arr.astype(dtype), 1)
     return path
 
 

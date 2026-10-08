@@ -54,6 +54,16 @@ hydro:
   snap_dist_m: 90                # snap pour points to the highest flow accumulation
   clip_to_aoi: true              # also write AOI-clipped copies of the main rasters
 
+# ---- Flood post-processing of the hydro GeoTIFFs --------------------------
+flood:
+  enabled: true
+  water_levels_m: [1, 2, 3, 5]   # HAND inundation scenarios (water level above channel)
+  hand_class_breaks_m: [1, 3, 5, 10]   # susceptibility: <=1 very high ... >10 very low
+  ponding_min_depth_m: 0.3       # closed depressions at least this deep = ponding zone
+  ponding_min_area_m2: 1800      # drop polygons smaller than 2 cells
+  vectorize: true                # also write polygons to flood/flood_polygons.gpkg
+  quicklook: true                # flood/flood_quicklook.png
+
 # ---- QA --------------------------------------------------------------------
 qa:
   enabled: true                  # stats for every DEM and AWS-vs-GEE difference

@@ -19,6 +19,10 @@ config.yaml ──► aoi.py ──► AOI + buffer ──► snapped UTM grid (
                          hydro.py (WhiteboxTools)
    pit fill → least-cost breach → D8 → flow acc → streams/order → HAND, TWI,
    sink depth, slope, hillshade, optional watersheds
+                             │
+                         flood.py (post-processing of the GeoTIFFs)
+   HAND inundation scenarios · susceptibility classes · ponding zones ·
+   area statistics (CSV) · polygons (GPKG) · quick-look map (PNG)
 ```
 
 ## Setup
@@ -33,7 +37,16 @@ For GEE, set `gee.enabled: true` and `gee.project` to a Cloud project registered
 python run_pipeline.py                                # every step enabled in config.yaml
 python run_pipeline.py --steps aws hydro              # AWS only, no GEE
 python run_pipeline.py --bbox 77.55 12.90 77.65 13.00 --name blr_east
-python run_pipeline.py --steps hydro                  # rerun hydro with new thresholds
+python run_pipeline.py --steps hydro flood            # rerun hydro with new thresholds
+python run_pipeline.py --steps flood                  # only redo flood maps (new levels/classes)
+```
+
+### Processing a GeoTIFF from outside the pipeline
+Use `--import-dem` for a GEE *Export to Drive* result, a DEM you downloaded yourself, or local LiDAR.
+Drive splits big exports into `...-0000000000-0000000000.tif` tiles, and a glob pattern picks them all up.
+Tiles are mosaicked, warped onto the analysis grid and saved as `dem/dem_<import-name>_utm.tif`:
+```bash
+python run_pipeline.py --import-dem "C:/Downloads/dem_fabdem_gee_utm*.tif"        --import-name fabdem_drive --hydro-input fabdem_drive --steps qa hydro flood
 ```
 The AOI can be a bbox, a point with a radius, or a vector file (`aoi.type`).
 
@@ -50,6 +63,12 @@ The AOI can be a bbox, a point with a radius, or a vector file (`aoi.type`).
 | `hydro/sink_depth.tif` | Depth of closed depressions in the raw DEM: pluvial ponding and storage |
 | `hydro/watersheds.*` | Catchments upstream of `hydro.pour_points` |
 | `hydro/aoi_clip/*_aoi.tif` | Main layers clipped to the unbuffered AOI |
+| `flood/inundation_depth_<h>m.tif` | HAND inundation for water level *h* above the channel (value = water depth) |
+| `flood/flood_susceptibility.tif` | HAND classes 5 = very high … 1 = very low (uint8, 0 = no data) |
+| `flood/ponding_depth.tif` | Closed depressions deeper than `ponding_min_depth_m` (pluvial ponding) |
+| `flood/flood_summary.csv/.json` | Flooded and ponded area (km², % of AOI), mean depth, ponding volume |
+| `flood/flood_polygons.gpkg` | Inundation and ponding polygons, one layer each |
+| `flood/flood_quicklook.png` | Susceptibility and inundation map over hillshade |
 | `qa/qa_report.json`, `run_report.json` | Stats, AWS-vs-GEE differences, full provenance |
 
 ## Notes for flood work
@@ -75,3 +94,6 @@ The AOI can be a bbox, a point with a radius, or a vector file (`aoi.type`).
 - **Large AOIs:** the GEE `direct` mode pulls 16 MB chunks in parallel. For
   basins of tens of thousands of km², use `gee.mode: drive`. For AWS, set
   `cache_tiles: true` so tiles are downloaded once and reused.
+- **HAND inundation is static.** It fills every cell whose HAND is below the water level, whether or not
+  the water can actually reach it in time or volume. Use it for screening; for design floods use a
+  hydraulic model (HEC-RAS 2D, LISFLOOD-FP) with `hydro/dem_cond.tif` as the terrain.

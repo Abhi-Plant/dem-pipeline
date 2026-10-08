@@ -5,16 +5,19 @@ Usage
     python run_pipeline.py --config config.yaml
     python run_pipeline.py --config config.yaml --steps aws hydro
     python run_pipeline.py --config config.yaml --bbox 77.55 12.90 77.65 13.00 --name blr
+    python run_pipeline.py --import-dem "C:/Downloads/dem_fabdem_gee_utm*.tif" --import-name fabdem_drive                            --hydro-input fabdem_drive --steps qa hydro flood
 
 Output layout  (<output_dir>/<project_name>/)
     aoi.geojson, aoi_buffered.geojson, grid.json
     raw/   native 1-arcsec mosaic (EPSG:4326) and optional cached tiles
     dem/   DEMs on the common UTM analysis grid  (dem_<dataset>_<source>_utm.tif)
     hydro/ conditioned DEM, D8, flow accumulation, streams, HAND, TWI, sinks, ...
+    flood/ HAND inundation scenarios, susceptibility classes, ponding, statistics
     qa/    qa_report.json
     run_report.json
 """
 import argparse
+import glob
 import json
 import logging
 import sys
@@ -26,7 +29,7 @@ import yaml
 from aoi import WGS84, build_grid, load_aoi, save_geojson
 from rio_utils import raster_summary
 
-ALL_STEPS = ["aws", "gee", "hydro", "qa"]
+ALL_STEPS = ["aws", "gee", "qa", "hydro", "flood"]
 log = logging.getLogger("dem_pipeline")
 
 
@@ -38,6 +41,11 @@ def parse_args():
     ap.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"),
                     help="Override the AOI with a lon/lat bounding box")
     ap.add_argument("--name", help="Override project_name")
+    ap.add_argument("--import-dem", nargs="+", metavar="TIF",
+                    help="External DEM GeoTIFF(s) or glob patterns (e.g. GEE Drive export tiles) "
+                         "to place on the analysis grid as dem/dem_<import-name>_utm.tif")
+    ap.add_argument("--import-name", default="imported", help="Label for --import-dem (default: imported)")
+    ap.add_argument("--hydro-input", help="Override hydro.input (e.g. fabdem_gee or an --import-name)")
     return ap.parse_args()
 
 
@@ -49,9 +57,11 @@ def main():
         cfg["aoi"].update(type="bbox", bbox=args.bbox)
     if args.name:
         cfg["project_name"] = args.name
+    if args.hydro_input:
+        cfg["hydro"]["input"] = args.hydro_input
 
     out_root = (cfg_path.parent / cfg["output_dir"] / cfg["project_name"]).resolve()
-    dirs = {k: out_root / k for k in ("raw", "dem", "hydro", "qa")}
+    dirs = {k: out_root / k for k in ("raw", "dem", "hydro", "qa", "flood")}
     for d in dirs.values():
         d.mkdir(parents=True, exist_ok=True)
 
@@ -99,6 +109,16 @@ def main():
                                         g.get("chunk_px", 2048), g.get("workers", 4))
                 report["outputs"][f"{key}_gee"] = {"utm": str(path)}
 
+    # --- Import external DEM GeoTIFF(s), e.g. a GEE Drive export ---
+    if args.import_dem:
+        from sources import import_dems
+        paths = sorted({p for pat in args.import_dem for p in (glob.glob(pat) or [pat])})
+        missing = [p for p in paths if not Path(p).exists()]
+        if missing:
+            raise FileNotFoundError(f"--import-dem: not found: {missing}")
+        dst = import_dems(paths, grid, dirs["dem"] / f"dem_{args.import_name}_utm.tif")
+        report["outputs"][args.import_name] = {"sources": paths, "utm": str(dst)}
+
     # --- QA ---
     dem_files = {p.stem.replace("dem_", "").replace("_utm", ""): p
                  for p in sorted(dirs["dem"].glob("dem_*_utm.tif"))}
@@ -123,6 +143,15 @@ def main():
         report["outputs"]["hydro"] = products
         report["hydro_summary"] = {k: raster_summary(products[k])
                                    for k in ("dem_cond", "hand", "twi", "sink_depth")}
+
+    # --- Flood post-processing of the hydro GeoTIFFs ---
+    if "flood" in steps:
+        from flood import run_flood
+        if not (dirs["hydro"] / "hand.tif").exists():
+            raise FileNotFoundError("hydro/hand.tif not found. Run the hydro step first.")
+        products, summary = run_flood(dirs["hydro"], dirs["flood"], cfg["flood"], aoi_utm)
+        report["outputs"]["flood"] = products
+        report["flood_summary"] = summary
 
     report["elapsed_s"] = round(time.time() - t0, 1)
     (out_root / "run_report.json").write_text(json.dumps(report, indent=2, default=str))

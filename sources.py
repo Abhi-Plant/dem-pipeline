@@ -141,6 +141,46 @@ def warp_to_grid(src_path, grid, dst_path, resampling=Resampling.bilinear):
     return write_raster(dst_path, dst, grid.transform, grid.crs)
 
 
+def import_dems(paths, grid, dst_path, resampling=Resampling.bilinear):
+    """Import DEM GeoTIFF(s) produced outside the pipeline onto the analysis grid.
+
+    Typical inputs: a GEE Export-to-Drive result (Drive splits large exports into
+    several "...-0000000000-0000000000.tif" tiles), a DEM downloaded by hand,
+    or local LiDAR. Tiles sharing one CRS are mosaicked first, so bilinear
+    resampling has neighbours across tile seams. Files in different CRSs are
+    warped one by one, and the first file with valid data wins where they overlap.
+    """
+    out = np.full((grid.height, grid.width), NODATA, dtype="float32")
+    crss = set()
+    for path in paths:
+        with rasterio.open(path) as src:
+            if src.crs is None:
+                raise ValueError(f"{path} has no CRS")
+            crss.add(src.crs.to_string())
+    if len(paths) > 1 and len(crss) == 1:
+        arr, transform = merge(list(paths), nodata=NODATA, dtype="float32")
+        reproject(source=arr[0], destination=out, src_transform=transform, src_crs=crss.pop(),
+                  dst_transform=grid.transform, dst_crs=grid.crs,
+                  src_nodata=NODATA, dst_nodata=NODATA, resampling=resampling)
+        log.info("Import: mosaicked %d tile(s) and warped to the analysis grid", len(paths))
+        paths = []
+    for path in paths:
+        tmp = np.full_like(out, NODATA)
+        with rasterio.open(path) as src:
+            if src.crs is None:
+                raise ValueError(f"{path} has no CRS")
+            reproject(source=rasterio.band(src, 1), destination=tmp,
+                      dst_transform=grid.transform, dst_crs=grid.crs,
+                      src_nodata=src.nodata, dst_nodata=NODATA, resampling=resampling)
+        fill = (out == NODATA) & (tmp != NODATA)
+        out[fill] = tmp[fill]
+        log.info("Import: %s -> %.1f%% of grid filled", Path(path).name, 100 * fill.mean())
+    covered = 100 * (out != NODATA).mean()
+    if covered < 99:
+        log.warning("Import: only %.1f%% of the analysis grid has data. Check the input extent.", covered)
+    return write_raster(dst_path, out, grid.transform, grid.crs)
+
+
 # --------------------------------------------------------------------------- GEE
 def init_ee(project):
     import ee
