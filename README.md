@@ -97,3 +97,11 @@ The AOI can be a bbox, a point with a radius, or a vector file (`aoi.type`).
 - **HAND inundation is static.** It fills every cell whose HAND is below the water level, whether or not
   the water can actually reach it in time or volume. Use it for screening; for design floods use a
   hydraulic model (HEC-RAS 2D, LISFLOOD-FP) with `hydro/dem_cond.tif` as the terrain.
+
+## Licence
+
+The source code is released under the [MIT License](LICENSE). The licence covers this software only; no elevation data are included. DEMs you download remain under their providers' terms:
+
+- **Copernicus GLO-30**: free use with attribution: "© DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018 provided under COPERNICUS by the European Union and ESA; all rights reserved."
+- **FABDEM**: CC BY-NC-SA 4.0, so non-commercial use only; cite Hawker et al. (2022).
+- **NASADEM**: NASA open data; cite NASA JPL.
